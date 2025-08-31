@@ -64,10 +64,133 @@ func NewManager(settingsManager *SystemSettingsManager) (types.ConfigManager, er
 
 // ReloadConfig reloads the configuration from environment variables
 func (m *Manager) ReloadConfig() error {
+	// 检查.env文件是否存在
+	var envFileExists bool
+	if _, err := os.Stat(".env"); os.IsNotExist(err) {
+		// 保存原始的SILENT_MODE值
+		originalSilentMode := os.Getenv("SILENT_MODE")
+		// 设置静默模式，禁用项目日志输出
+		os.Setenv("SILENT_MODE", "true")
+		
+		// .env文件不存在，询问用户是否创建
+		fmt.Println("未找到.env文件，是否要创建一个.env文件？(y/n): ")
+		var response string
+		fmt.Scanln(&response)
+		
+		if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+			// 询问用户配置信息
+			fmt.Println("请输入配置信息：")
+			
+			// 询问PORT
+			fmt.Print("请输入端口号 (默认3001): ")
+			var port string
+			fmt.Scanln(&port)
+			if port == "" {
+				port = "3001"
+			}
+			
+			// 询问HOST
+			fmt.Print("请输入主机地址 (默认0.0.0.0): ")
+			var host string
+			fmt.Scanln(&host)
+			if host == "" {
+				host = "0.0.0.0"
+			}
+			
+			// 询问AUTH_KEY
+			fmt.Print("请输入认证密钥 (默认sk-123456): ")
+			var authKey string
+			fmt.Scanln(&authKey)
+			if authKey == "" {
+				authKey = "sk-123456"
+			}
+			
+			// 创建.env文件内容
+			defaultEnv := fmt.Sprintf(`# 服务器配置
+PORT=%s
+HOST=%s
+
+# 服务器读取、写入和空闲连接的超时时间（秒）
+SERVER_READ_TIMEOUT=60
+SERVER_WRITE_TIMEOUT=600
+SERVER_IDLE_TIMEOUT=120
+SERVER_GRACEFUL_SHUTDOWN_TIMEOUT=10
+
+# 从节点标识
+IS_SLAVE=false
+
+# 时区
+TZ=Asia/Shanghai
+
+# 认证配置 是必需的，用于保护管理 API 和 UI 界面
+AUTH_KEY=%s
+
+# 数据库配置 默认不填写，使用./data/gpt-load.db的SQLite
+# MySQL 示例:
+# DATABASE_DSN=root:123456@tcp(mysql:3306)/gpt-load?charset=utf8mb4&parseTime=True&loc=Local
+# PostgreSQL 示例:
+# DATABASE_DSN=postgres://postgres:123456@postgres:5432/gpt-load?sslmode=disable
+
+# Redis配置 默认不填写，使用内存存储
+# REDIS_DSN=redis://redis:6379/0
+
+# 并发数量
+MAX_CONCURRENT_REQUESTS=100
+
+# CORS配置
+ENABLE_CORS=true
+ALLOWED_ORIGINS=*
+ALLOWED_METHODS=GET,POST,PUT,DELETE,OPTIONS
+ALLOWED_HEADERS=*
+ALLOW_CREDENTIALS=false
+
+# 日志配置
+LOG_LEVEL=info
+LOG_FORMAT=text
+LOG_ENABLE_FILE=true
+LOG_FILE_PATH=./data/logs/app.log`, port, host, authKey)
+			
+			// 写入.env文件
+			if err := os.WriteFile(".env", []byte(defaultEnv), 0644); err != nil {
+				fmt.Printf("创建.env文件失败: %v\n", err)
+			} else {
+				fmt.Println("已创建.env文件")
+				envFileExists = true
+			}
+		} else {
+			fmt.Println("未创建.env文件，将使用默认配置")
+			envFileExists = false
+		}
+		
+		// 恢复原始的SILENT_MODE值
+		if originalSilentMode == "" {
+			os.Unsetenv("SILENT_MODE")
+		} else {
+			os.Setenv("SILENT_MODE", originalSilentMode)
+		}
+	} else {
+		// .env文件存在
+		envFileExists = true
+	}
+	
+	// 尝试加载.env文件
 	if err := godotenv.Load(); err != nil {
-		logrus.Info("Info: Create .env file to support environment variable configuration")
+		// 不显示这条日志信息
 	}
 
+	// 如果.env文件不存在或者加载失败，设置默认的环境变量
+	if !envFileExists {
+		// 设置默认的环境变量
+		if os.Getenv("PORT") == "" {
+			os.Setenv("PORT", "3001")
+		}
+		if os.Getenv("HOST") == "" {
+			os.Setenv("HOST", "0.0.0.0")
+		}
+		if os.Getenv("AUTH_KEY") == "" {
+			os.Setenv("AUTH_KEY", "sk-123456")
+		}
+	}
 	config := &Config{
 		Server: types.ServerConfig{
 			IsMaster:                !utils.ParseBoolean(os.Getenv("IS_SLAVE"), false),
